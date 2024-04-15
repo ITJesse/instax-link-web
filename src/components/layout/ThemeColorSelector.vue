@@ -1,72 +1,105 @@
 <template>
-    <div class="ml-0 d-flex flex-row align-center">
-        <a style="text-decoration: none!important;" href="https://github.com/linssenste/instax-link-web" target="_blank">
-            <v-btn class="mr-6" color="black" icon variant="tonal" density="comfortable"><v-icon size="large"
-                    color="black">mdi-github</v-icon></v-btn>
-        </a>
+	<div oncontextmenu="return false" class="selector-row">
 
+		<div v-for="color in colors" :key="color" v-on:click="changeThemeColor(color)" :class="selectedClass(color)"
+			 :data-testid="`${color}-color-item`" :title="`Theme color '${color}''`" :style="colorStyling(color)"
+			 class="color-item" />
 
-        <div v-on:click="selectedColor='pink'" :class="selectedColor==='pink'? 'color-selector-item-selected':''"
-            data-testid="pink-color-selector-item" class="color-selector-item bg-pink rounded-pill ">
-        </div>
-        <div v-on:click="selectedColor='red'" :class="selectedColor==='red'? 'color-selector-item-selected':''"
-            data-testid="red-color-selector-item" class="color-selector-item bg-red rounded-pill "></div>
-        <div v-on:click="selectedColor='orange'" :class="selectedColor==='orange'? 'color-selector-item-selected':''"
-            data-testid="orange-color-selector-item" class="color-selector-item bg-orange rounded-pill "></div>
-
-
-        <div v-on:click="selectedColor='purple'" :class="selectedColor==='purple'? 'color-selector-item-selected':''"
-            data-testid="purple-color-selector-item" class="color-selector-item bg-purple rounded-pill "></div>
-
-
-
-
-    </div>
-</template>
+	</div>
+</template> 
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
-import { ref, watch } from 'vue'
+import { ref, onMounted, watchEffect } from 'vue'
 
-const selectedColor=ref('white')
-const emit=defineEmits(['color-change'])
+// color update event
+const emit = defineEmits<{
 
+	/**
+	 * emits selected color to be updated on printer if connected
+	 * @param {string} color
+	 */
+	(e: 'color-change', color: string): void;
+}>();
+
+
+const colors = ['black', 'red', 'orange', 'yellow', 'green', 'blue', 'pink']; // yeah, i know... #pride
+const selectedColor = ref(localStorage.getItem('theme-color') ?? 'red'); // default color
+
+const colorStyling = (name: string) => ({ backgroundColor: `var(--${name}-color)` });
+const selectedClass = (color: string) => (selectedColor.value == color ? 'color-selected' : '');
 
 onMounted(() => {
-    selectedColor.value=localStorage.getItem('background')||'pink'
+	// const params = new Proxy(new URLSearchParams(window.location.search), {
+	// 	get: (searchParams: any, prop: any) => searchParams.get(prop),
+	// });
+
+	// if (params.random === "true") {
+	// 	const randomIndex = Math.floor(Math.random() * (colors.length - 1)) + 1;
+	// 	selectedColor.value = colors[randomIndex]
+	// }
+
+	// emit default color on loaded to make sure everything is setup correctly
+	changeThemeColor(selectedColor.value);
 })
 
-watch(selectedColor, () => {
-    emitColor();
-})
 
-function emitColor(): void {
+watchEffect(() => {
+	document.documentElement.style.setProperty('--dynamic-bg-color', `var(--${selectedColor.value}-color)`);
+});
 
-    localStorage.setItem('background', selectedColor.value)
-    emit('color-change', selectedColor.value)
+// emit event when color is changed
+function changeThemeColor(color: string): void {
+	selectedColor.value = color;
+	localStorage.setItem('theme-color', color)
+	emit('color-change', selectedColor.value)
+
+	// update meta theme color: 
+	const themeColorMetaTag = document.querySelector('meta[name="theme-color"]');
+
+	// Check if the meta tag exists
+	if (themeColorMetaTag) {
+		// Update the content attribute to the new color
+		themeColorMetaTag.setAttribute('content', color);
+	} else {
+		// If the meta tag does not exist, create one and append it to the <head>
+		const newMetaTag = document.createElement('meta');
+		newMetaTag.setAttribute('name', 'theme-color');
+		newMetaTag.setAttribute('content', color);
+		document.head.appendChild(newMetaTag);
+	}
 
 }
+
 </script>
 
 <style scoped>
-.color-selector-item {
-    width: 20px;
-    cursor: pointer;
-    height: 20px;
-    transition: all 50ms linear;
-    margin-right: 14px !important;
+.selector-row {
+
+	display: flex;
+	flex-direction: row;
+	align-items: center;
 }
 
-.color-selector-item:hover {
-    transform: scale(1.3);
-    transition: all 50ms linear;
+.color-item {
+	width: 20px;
+	cursor: pointer;
+	height: 20px;
 
+	-moz-transition: all 100ms linear;
+	-webkit-transition: all 100ms linear;
+	transition: all 100ms linear;
+	margin-right: 5px !important;
+	border-radius: 3px;
 }
 
-.color-selector-item-selected {
-    pointer-events: none;
-    transform: scale(1.3);
-    border-radius: 4px !important;
+@media (hover: hover) and (pointer: fine) {
+	.color-item:hover {
+		transform: scale(1.1);
 
+	}
+}
+
+.color-selected {
+	border-radius: 50% !important;
 }
 </style>

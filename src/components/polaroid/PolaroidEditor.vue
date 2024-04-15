@@ -1,323 +1,233 @@
 <template>
-    <div oncontextmenu="return false" class="polaroid-area elevation-4" :style="``" data-testid="polaroid-area">
+	<div>
 
-        <!-- {{config}} {{(((config.width/config.height)||1)*((config.height-500)||300))}} -->
-        <div :key="String(config.width)" class="cropper-area"
-            :style="`width: ${(((config.width/config.height)||1)*(config.height-500||300))}px!important; height: ${(config.height-500)}px!important`">
+		<DropImageUpload v-on:dropped="getFileData($event)" />
 
 
-            <!-- Printing overlay!-->
-
-            <div v-if="(printerStatus===2||printerStatus===3||printerStatus===4)"
-                style="position: absolute; height: 100%; width: 100%; z-index: 50">
-                <div
-                    style="position: relative; height: 100%; width: 100%; background-color: rgba(240, 240, 240, .3); transition: all 150ms linear;">
-
-                    <slot name="overlay" />
-                </div>
-            </div>
-
-            <VuePictureCropper v-if="image!=null"
-                :style="(printerStatus===2||printerStatus===3||printerStatus===4)? 'opacity: .15; pointer-events: none':''"
-                ref="cropperObj" :boxStyle="cropperBox" class="cropper" :presetMode="cropperPreset" :img="image"
-                :options="cropperOptions" />
-
-            <div v-else data-testid="drop-area" v-on:click="uploadImage"
-                class="drop-area d-flex flex-column align-center justify-center">
-
-                <input data-testid="input-file" v-on:change="inputChanged($event)" type="file" name="" accept="image/*"
-                    id='upload' hidden>
-
-                <div class="d-flex flex-column ma-0 mt-4 align-center">
-
-                    <v-icon color="grey-darken-2" size="40">mdi-image</v-icon>
-                    <span style="text-transform: uppercase; letter-spacing: 1.05px; font-size: 14px"
-                        class="text-grey-darken-2 ml-2 mt-2 font-weight-bold">Upload image</span>
-                </div>
-            </div>
-
-        </div>
-        <div v-if="isEditable" style=" width: 100%; height: 95px; background-color: white;"
-            data-testid="color-selector-container">
-            <ColorSelector data-testid="color-selector" class="pt-4" v-on:color-change="setBackgroundColor" />
-
-            <div class="d-flex pt-5  flex-row align-center ma-0">
+		<div class="polaroid-editor"
+			 :style="`width: ${config.type == InstaxFilmVariant.MINI ? 270 : (config.type == InstaxFilmVariant.SQUARE ? 350 : 500)}px`">
 
 
+			<PolaroidFrame :type="config.type" style="z-index: 5" :key="config.type">
+				<template v-slot:polaroid-area>
 
-                <v-btn class="elevation-0 mr-2" v-on:click="rotateImage(1)" size="small" variant="tonal" :ripple="false"
-                    icon="mdi-rotate-right" color="black"></v-btn>
-                <v-btn class="elevation-0 mr-4" v-on:click="rotateImage(-1);" size="small" variant="tonal" :ripple="false"
-                    icon="mdi-rotate-left" color="black"></v-btn>
+					<CropperArea v-if="image" class="cropper-area" :key="image" ref="cropperAreaRef" :config="config"
+								 :src="image" :loading="loading" v-on:remove-image="removeImageEvent"
+								 :settings="imageSettings" v-on:save="savePolaroidCanvas" />
 
-                <v-btn class="elevation-0 ml-0 mr-0" v-on:click="rotateImage(-90);" size="small" variant="tonal"
-                    :ripple="false" icon="mdi-format-rotate-90"></v-btn>
+					<SelectImageUpload v-else v-on:selected="getFileData($event)" />
+					<div v-if="loading" class="loading-overlay">
+						<div
+							 style="position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); color: black; opacity: .35; letter-spacing: 1px;">
+							LOADING ...</div>
+					</div>
+
+				</template>
+
+				<template v-slot:polaroid-text>
+					<div v-if="!image" class="polaroid-caption">
+						<span>Choose an image!</span>
+					</div>
+
+					<button v-else-if="!loading" class="expand-button" v-on:click="expandContract"
+							:title="`${settingsExpansion ? 'Hide' : 'Show'} image settings`"
+							:style="settingsExpansion ? 'transform: rotate(-180deg)' : 'transform: rotate(0deg)'">
+						<img width="20" height="20" :title="`${settingsExpansion ? 'Hide' : 'Show'} image settings`"
+							 src="@/assets/icons/controls/chevron-down.svg" />
+					</button>
+
+				</template>
+			</PolaroidFrame>
+
+			<div id="expand-container">
+				<div id="expand-contract" :style="expansion" class="collapsed">
+					<ImageSettings :queueLength="queueLength" :config="config" :savePolaroid="saveEditorPolaroid"
+								   v-on:change="imageSettings = $event" v-on:scale="fitImageEvent"
+								   v-on:remove-image="image = null" />
+
+				</div>
+
+			</div>
 
 
-                <v-spacer />
-                <v-btn class="elevation-0 ml-0" v-on:click="image=null" variant="flat" color="#F0F0F0" :ripple="false" icon
-                    density="comfortable">
-                    <v-icon size="small" color="red">mdi-delete</v-icon></v-btn>
-            </div>
-
-        </div>
-        <div v-else class="d-flex flex-row align-center justify-center "
-            style=" width: 100%; height: 95px; background-color: white;">
-            <slot name="text-area" />
-
-        </div>
-    </div>
+		</div>
+	</div>
 </template>
-
-
 
 <script setup lang="ts">
 
-import { ref, watch } from 'vue';
-import VuePictureCropper, { cropper } from 'vue-picture-cropper'
-import ColorSelector from '@/components/polaroid/ColorSelector.vue'
-import ImageCompressor from 'image-compressor.js';
-import { computed } from 'vue';
+import { computed, ref, watch, Ref } from 'vue'
+import PolaroidFrame from './PolaroidFrame.vue';
+import CropperArea from './CropperArea.vue';
+import ImageSettings from './ImageSettings.vue';
 
-const emit=defineEmits(['save', 'cancelPrinting', 'connect', 'count', 'saveable'])
-const props=defineProps<{
+import DropImageUpload from '../files/DropImageUpload.vue';
+import SelectImageUpload from '../files/SelectImageUpload.vue';
+import { InstaxFilmVariant, type PrinterStateConfig } from '../../interfaces/PrinterStateConfig';
 
-    config: any,
+const emit = defineEmits(['image'])
 
-    color: string,
-    printerStatus: number
-    save: boolean
+const props = defineProps<{
+	config: PrinterStateConfig,
+	queueLength: number;
 }>()
 
+
+
+const cropperAreaRef: Ref<typeof CropperArea | null> = ref(null);
 props.config;
-props.printerStatus;
 
-watch(() => props.save, () => {
 
-    saveImage();
+const loading = ref(false)
+const imageSettings = ref({
+	rotation: 0,
+	text: '',
+	color: '#FFFFFF'
 })
 
-
-
-
-const cropperObj=ref(null);
-const backgroundColor=ref('#FFFFFF')
-const image=ref<string|null>(null)
-
-
-const isEditable=computed(() => {
-    return image.value!=null&&(props.printerStatus!==2&&props.printerStatus!==3&&props.printerStatus!==4)
+const expansion = computed(() => {
+	return `margin-top: ${(!settingsExpansion.value || !image.value) ? (-120 - 51) : (props.config.connection ? -55 : 10)}px; pointer-events: ${settingsExpansion.value ? 'inherit' : 'none'}`
 })
 
-watch(isEditable, () => {
-    emit('saveable', isEditable.value)
-})
+const settingsExpansion = ref(false)
+
+const image = ref<string | null>(null);
+watch(image, (newVal, prevVal) => {
+	const el = document.getElementById("expand-contract");
+
+	if (el && ((newVal == null && prevVal != null) || (prevVal == null && newVal != null))) {
+		expandContract();
+
+		setTimeout(() => {
+			imageSettings.value.rotation = 0;
+		}, 750);
+
+	}
+});
 
 
-function rotateImage(degrees: number): void {
-    (cropper as any).rotate(degrees);
+function removeImageEvent() {
+	image.value = null;
+	setTimeout(() => {
+		imageSettings.value.text = ""
+	}, 500);
 }
 
-const cropperPreset: any=computed(() => {
-    return {
-        mode: 'fixedSize',
-        width: props.config.width||800,
-        height: props.config.width||800,
-    }
-})
+async function saveEditorPolaroid(download = false): Promise<void> {
 
 
-const cropperOptions: any=computed(() => {
-    return {
-        viewMode: 0,
-        doubleClickToggle: false,
-        toggleDragModeOnDblclick: false,
-        autoCropArea: true,
-        dragMode: 'move',
-        aspectRatio: (props.config.width/props.config.height)||1,
-        cropBoxMovable: false,
-        cropBoxResizable: false
-    }
-})
-
-const cropperBox=computed(() => {
-    return {
-        width: ((((props.config.width/props.config.height)||1))*((props.config.height-500)||300))+'px',
-        height: ((props.config.height-500)||300)+'px',
-        backgroundColor: '#FFFFFF'
-
-    }
-})
+	loading.value = true;
 
 
-function setBackgroundColor(color: string): void {
-    backgroundColor.value=color;
 
-    if (document.getElementsByClassName('cropper-view-box')!=null&&document.getElementsByClassName('cropper-view-box').length>0) {
-        ((document.getElementsByClassName('cropper-view-box')[0] as any).style.backgroundColor=backgroundColor.value);
-    }
-}
+	expandContract();
+	await new Promise((r) => setTimeout(r, 525)) // await animation 
 
 
-function uploadImage(): void {
-    document.getElementById('upload')?.click();
-}
+	const imageUrl = await cropperAreaRef.value?.saveCanvasImage(!download);
+	emit("image", { src: imageUrl, download: download })
 
+	loading.value = false
 
-function inputChanged(e: Event): void {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-
-    const file=(e.target as any).files[0];
-
-    getFileData(file)
 
 }
 
-function getFileData(file: File): void {
-
-    var reader=new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload=async function () {
-        image.value=reader.result as string;
-        setBackgroundColor('#FFFFFF')
-
-    };
-    reader.onerror=function (error) {
-        console.log('Error: ', error);
-    };
+function expandContract() {
+	if (!image.value) settingsExpansion.value = false;
+	else settingsExpansion.value = !settingsExpansion.value
 }
 
 
-async function saveImage(): Promise<void> {
-
-    if (image.value==null) return emit('save', null);
-    const canvas=cropper!.getCroppedCanvas({ width: props.config.width||800, height: props.config.height||800, fillColor: backgroundColor.value, imageSmoothingEnabled: false });
-
-
-
-
-    // Convert canvas to a Blob
-    canvas.toBlob(async (blob) => {
-        // Create a File from the Blob
-        const file=new File([blob as Blob], "compressed-image.jpeg", { type: "image/jpeg" });
-
-        // Compress the file using ImageCompressor
-        const compressor=new ImageCompressor();
-
-        let isCompressed=false;
-        let compressionQuality=1;
-        let compressedFile=null;
-
-        while (isCompressed==false) {
-            const options={
-                maxWidth: props.config.width||800,
-                maxHeight: props.config.height||800,
-                minWidth: props.config.width||800,
-                minHeight: props.config.height||800,
-                quality: compressionQuality, // Adjust this value to control the image compression quality
-            };
-
-            compressedFile=await compressor.compress(file, options)
-
-            console.log(options)
-            // Check if the compressed file size is smaller than 65kB
-            if (compressedFile.size>=60*1024) {
-                compressionQuality-=.1
-                continue;
-            }
-
-            isCompressed=true;
-        }
-
-
-        if (compressedFile==null) throw new Error();
-
-        const reader=new FileReader();
-        reader.onloadend=() => {
-            const base64=reader.result;
-            emit('save', base64);
-        };
-        reader.readAsDataURL(compressedFile);
-    }, "image/jpeg");
+function fitImageEvent(type: string): void {
+	if (cropperAreaRef.value) cropperAreaRef.value.fit((type == 'horizontal'));
 
 }
+function savePolaroidCanvas(imageURL: string): void {
+	emit('image', imageURL)
+}
+function getFileData(file: File | null): void {
+	if (!file) return;
+
+	const reader = new FileReader();
+	reader.readAsDataURL(file);
+
+	reader.onload = async function () {
+		image.value = reader.result as string;
+	};
+	reader.onerror = function (error) {
+		console.log('Error: ', error);
+	};
+}
+
 
 props.config;
-props.color;
-props.printerStatus;
 </script>
-
-<style >
-.cropper-view-box {
-    box-shadow: 0 0 0 0px #F0F0F0;
-    background-color: white;
-    /* border-bottom: 100px solid #F0F0F0; */
-    outline: 0;
-}
-
-.cropper-face {
-    background-color: inherit !important;
-}
-
-.cropper-dashed,
-.cropper-point.point-se,
-.cropper-point.point-sw,
-.cropper-point.point-nw,
-.cropper-point.point-ne,
-.cropper-line {
-    display: none !important;
-}
-
-.cropper-view-box {
-    outline: inherit !important;
-}
-</style>
 
 
 <style scoped>
-img {
-    display: block;
+.loading-overlay {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	top: 0;
+	left: 0;
 
-    /* This rule is very important, please don't ignore this */
-    max-width: 100%;
+	background: rgba(255, 255, 255, .75);
+	-webkit-backdrop-filter: blur(8px);
+	-moz-backdrop-filter: blur(8px);
+	backdrop-filter: blur(8px);
+
+}
+
+.polaroid-editor {
+	position: absolute;
+
+	left: 50%;
+	top: calc(50% + 15px);
+	transform: translate(-50%, -50%);
+
+	display: flex;
+	flex-direction: column;
+	align-items: center;
 }
 
 
-.polaroid-area {
-    position: relative;
-    min-height: 380px;
-    min-width: 200px;
-    border: 15px solid white;
-    border-top: 20px solid white !important;
-    background-color: white;
-    border-radius: 8px;
+
+#expand-container {
+	overflow: hidden;
+	position: relative;
+	width: 100%;
+	padding: 5px;
 }
 
-
-.drop-area {
-    height: 100%;
-    cursor: pointer;
-    width: 100%;
-    background-color: #E0E0E0;
-    border: 2px dashed #C0C0C0;
-    border-radius: 5px;
+#expand-contract {
+	width: 100%;
+	transition: all 450ms ease-in-out;
 }
 
-.cropper {
-    transform: scale(1);
-    border: 2px solid #EAEAEA;
-    border-radius: 5px !important;
-    overflow: hidden !important
+#expand-contract.expanded {
+	margin-top: 10px;
 }
+
 
 .cropper-area {
-    position: relative;
-    height: 100%;
-    height: 300px;
-    margin-top: 10px;
-    border-radius: 5px;
-    overflow: hidden !important;
-    background-color: #F0F0F0;
+	transition: all 250ms ease-in-out;
+}
+
+.expand-button {
+	background-color: transparent;
+	outline: none;
+	border: none;
+
+	color: #000000 !important;
+	opacity: .3;
+	padding: 5px;
+	margin-top: 0px;
+	transition: all 250ms;
+	cursor: pointer;
+}
+
+.expand-button:hover {
+	opacity: .75;
 }
 </style>
