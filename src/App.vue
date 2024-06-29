@@ -325,8 +325,7 @@ async function finishUpPrinting() {
 
 @media only screen and (max-width: 600px) {
 
-	.printer-variant-settings,
-	.project-links {
+	.theme-color-selector {
 		display: none !important;
 	}
 }
